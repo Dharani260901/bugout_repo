@@ -7,6 +7,12 @@ export default function RoomPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
+  const API_BASE =
+    import.meta.env.VITE_API_URL ||
+    "http://localhost:5000/api";
+
+  const SOCKET_URL = API_BASE.replace("/api", "");
+
   const socketRef = useRef(null);
   const peerRef = useRef(null);
   const localVideoRef = useRef(null);
@@ -19,7 +25,6 @@ export default function RoomPage() {
     localStorage.getItem("user") || '{"id":"anon","name":"Anonymous"}',
   );
 
-  /* ================= STATES ================= */
   const [remoteVideoReady, setRemoteVideoReady] = useState(false);
   const [roomName, setRoomName] = useState("Secure Session");
   const [remoteVolume, setRemoteVolume] = useState(0);
@@ -37,12 +42,16 @@ export default function RoomPage() {
   const [isConnecting, setIsConnecting] = useState(false);
 
   const remoteUser = members.find((m) => m.id !== user.id);
-
-  
-
-  /* ---------------- SIGNALING & WebRTC (Logic preserved) ---------------- */
+  // ====================== SOCKET ======================
   useEffect(() => {
-    socketRef.current = io("http://localhost:5000");
+    socketRef.current = io(SOCKET_URL, {
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: 10,
+    });
+
+    socketRef.current.removeAllListeners();
+
     socketRef.current.on("connect", () => {
       socketRef.current.emit("join-room", {
         roomId,
@@ -50,8 +59,13 @@ export default function RoomPage() {
       });
     });
 
-    socketRef.current.on("members-update", (list) => setMembers(list));
-    socketRef.current.on("receive-message", (msg) => setMessages((prev) => [...prev, msg]));
+    socketRef.current.on("receive-message", (msg) => {
+  setMessages((prev) => [...prev, msg]);
+});
+    
+
+    socketRef.current.on("members-update", setMembers);
+
     socketRef.current.on("incoming-call", ({ from }) => {
       if (from.id !== user.id) setIncomingCall(from);
     });
@@ -61,109 +75,146 @@ export default function RoomPage() {
     });
 
     socketRef.current.on("webrtc-answer", async ({ answer }) => {
-      try {
-        if (peerRef.current) {
-          await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-          if (pendingCandidates.current.length > 0) {
-            pendingCandidates.current.forEach(async (candidate) => {
-              await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-            });
-            pendingCandidates.current = [];
-          }
-        }
-      } catch (err) { console.error(err); }
+      if (!peerRef.current) return;
+
+      await peerRef.current.setRemoteDescription(
+        new RTCSessionDescription(answer)
+      );
+
+      for (const candidate of pendingCandidates.current) {
+        await peerRef.current.addIceCandidate(candidate);
+      }
+      pendingCandidates.current = [];
     });
 
     socketRef.current.on("webrtc-ice-candidate", async ({ candidate }) => {
-      if (peerRef.current?.remoteDescription) {
-        await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-      } else {
-        pendingCandidates.current.push(candidate);
+      if (!peerRef.current) return;
+
+      const ice = new RTCIceCandidate(candidate);
+
+      if (!peerRef.current.remoteDescription) {
+        pendingCandidates.current.push(ice);
+        return;
       }
+
+      await peerRef.current.addIceCandidate(ice);
     });
 
-    socketRef.current.on("remote-video-change", ({ enabled }) => setRemoteVideoOn(enabled));
-    socketRef.current.on("remote-mic-change", ({ enabled }) => setRemoteMicOn(enabled));
-    socketRef.current.on("remote-speaking", ({ speaking, volume }) => {
-      setRemoteSpeaking(speaking);
-      setRemoteVolume(volume || 0);
-    });
-
-    socketRef.current.on("call-ended", () => endCall());
-
-    return () => {
-      if (socketRef.current) socketRef.current.disconnect();
-    };
+    return () => socketRef.current.disconnect();
   }, [roomId, user.id]);
 
-  /* ---------------- WebRTC Actions ---------------- */
-  const initializePeerConnection = async (isCaller = false) => {
 
-   if (localVideoRef.current?.srcObject) {
-  localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
-  localVideoRef.current.srcObject = null;
-}
+  useEffect(() => {
+  const fetchMessages = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setTimeout(() => {
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-          localVideoRef.current.play().catch((e) => console.error(e));
-        }
-      }, 100);
-
-      startSpeakingDetection(stream);
-
-      if (!peerRef.current) {
-        peerRef.current = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-        peerRef.current.ontrack = (event) => {
-          const [remoteStream] = event.streams;
-          if (!remoteStream || !remoteVideoRef.current) return;
-          remoteVideoRef.current.srcObject = remoteStream;
-          remoteVideoRef.current.onloadeddata = () => {
-            remoteVideoRef.current.play().catch(() => {});
-            setRemoteStreamActive(true);
-            requestAnimationFrame(() => setRemoteVideoReady(true));
-          };
-        };
-        peerRef.current.onicecandidate = (event) => {
-          if (event.candidate) {
-            socketRef.current.emit("webrtc-ice-candidate", { roomId, candidate: event.candidate });
-          }
-        };
-      }
-
-      if (peerRef.current.getSenders().length === 0) {
-        stream.getTracks().forEach(track => peerRef.current.addTrack(track, stream));
-      }
-
-      if (isCaller) {
-        const offer = await peerRef.current.createOffer();
-        await peerRef.current.setLocalDescription(offer);
-        socketRef.current.emit("webrtc-offer", { roomId, offer });
-      }
-
-      setCallActive(true);
-      setIsConnecting(false);
-    } catch (err) { 
-      console.error(err)
+      const res = await fetch(`${API_BASE}/api/messages/${roomId}`);
+      const data = await res.json();
+      setMessages(data);
+    } catch (err) {
+      console.error("Error loading messages:", err);
     }
   };
 
+  fetchMessages();
+}, [roomId]);
+  // ====================== PEER ======================
+  const createPeer = () => {
+    peerRef.current = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        // OPTIONAL TURN
+        // {
+        //   urls: "turn:global.relay.metered.ca:80",
+        //   username: "YOUR_USERNAME",
+        //   credential: "YOUR_PASSWORD"
+        // }
+      ],
+    });
+
+    peerRef.current.onicecandidate = (event) => {
+      if (event.candidate) {
+        socketRef.current.emit("webrtc-ice-candidate", {
+          roomId,
+          candidate: event.candidate,
+        });
+      }
+    };
+
+    peerRef.current.ontrack = (event) => {
+      const [remoteStream] = event.streams;
+      remoteVideoRef.current.srcObject = remoteStream;
+      setRemoteStreamActive(true);
+      setRemoteVideoReady(true);
+    };
+
+    peerRef.current.onconnectionstatechange = () => {
+      console.log("Connection State:", peerRef.current.connectionState);
+    };
+  };
+
+  // ====================== CALLER ======================
+  const startCall = async () => {
+  if (!peerRef.current) createPeer();
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true,
+  });
+
+  localVideoRef.current.srcObject = stream;
+
+  stream.getTracks().forEach((track) => {
+    peerRef.current.addTrack(track, stream);
+  });
+
+  const offer = await peerRef.current.createOffer();
+  await peerRef.current.setLocalDescription(offer);
+
+  socketRef.current.emit("webrtc-offer", { roomId, offer });
+
+  setCallActive(true);
+  setIsConnecting(false);
+};
+  // ====================== RECEIVER ======================
+ const handleAnswer = async () => {
+  if (!incomingOfferRef.current) {
+    console.error("❌ No offer received yet");
+    return;
+  }
+
+  if (!peerRef.current) createPeer();
+
+  await peerRef.current.setRemoteDescription(
+    new RTCSessionDescription(incomingOfferRef.current)
+  );
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true,
+  });
+
+  localVideoRef.current.srcObject = stream;
+
+  stream.getTracks().forEach((track) => {
+    peerRef.current.addTrack(track, stream);
+  });
+
+  const answer = await peerRef.current.createAnswer();
+  await peerRef.current.setLocalDescription(answer);
+
+  socketRef.current.emit("webrtc-answer", { roomId, answer });
+
+  setIncomingCall(null);
+  setCallActive(true);
+  setIsConnecting(false);
+};
+
   const endCall = () => {
-    setCallActive(false);
-    setRemoteStreamActive(false);
-    setIncomingCall(null);
-    setIsConnecting(false);
-    setRemoteVideoReady(false);
-    if (localVideoRef.current?.srcObject) {
-      localVideoRef.current.srcObject.getTracks().forEach((track) => track.stop());
-      localVideoRef.current.srcObject = null;
-    }
     if (peerRef.current) {
       peerRef.current.close();
       peerRef.current = null;
     }
+    setCallActive(false);
     socketRef.current.emit("end-call", { roomId });
   };
 
@@ -176,62 +227,47 @@ export default function RoomPage() {
     }
   };
 
- const toggleMic = () => {
-  const track = localVideoRef.current?.srcObject?.getAudioTracks()[0];
-  if (track) {
-    track.enabled = !track.enabled;
-    setMicOn(track.enabled);
+  const toggleMic = () => {
+    const track = localVideoRef.current?.srcObject?.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      setMicOn(track.enabled);
 
-    socketRef.current.emit("mic-toggle", {
-      roomId,
-      enabled: track.enabled,
-    });
-  }
-};
-
-  const startSpeakingDetection = (stream) => {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const analyser = audioContext.createAnalyser();
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const check = () => {
-      analyser.getByteFrequencyData(data);
-      const volume = data.reduce((sum, v) => sum + v, 0) / data.length;
-      socketRef.current.emit("speaking", { roomId, speaking: volume > 15, volume: Math.min(volume / 100, 1) });
-      if (callActive) requestAnimationFrame(check);
-    };
-    check();
+      socketRef.current.emit("mic-toggle", {
+        roomId,
+        enabled: track.enabled,
+      });
+    }
   };
 
   const refreshCamera = async () => {
-  try {
-    // Stop old tracks first
-    if (localVideoRef.current?.srcObject) {
-      localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      localVideoRef.current.srcObject = null;
+    try {
+      if (localVideoRef.current?.srcObject) {
+        localVideoRef.current.srcObject.getTracks().forEach(track => track.stop());
+        localVideoRef.current.srcObject = null;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+
+      localVideoRef.current.srcObject = stream;
+
+      const videoTrack = stream.getVideoTracks()[0];
+      const sender = peerRef.current
+        ?.getSenders()
+        .find((s) => s.track?.kind === "video");
+
+      if (sender) sender.replaceTrack(videoTrack);
+
+      setVideoOn(true);
+    } catch (err) {
+      console.error(err);
     }
+  };
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    });
-
-    localVideoRef.current.srcObject = stream;
-
-    const videoTrack = stream.getVideoTracks()[0];
-    const sender = peerRef.current
-      ?.getSenders()
-      .find((s) => s.track?.kind === "video");
-
-    if (sender) sender.replaceTrack(videoTrack);
-
-    setVideoOn(true);
-  } catch (err) {
-    console.error(err);
-  }
-};
-
+  
   /* ================= UI HELPERS ================= */
   const getAvatarColor = (id = "") => {
     const colors = ["bg-indigo-500", "bg-emerald-500", "bg-rose-500", "bg-amber-500", "bg-cyan-500"];
@@ -373,29 +409,13 @@ export default function RoomPage() {
               </div>
               <h3 className="text-2xl font-black mb-2">{incomingCall.name}</h3>
               <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mb-10">Requesting Secure Link...</p>
-              <button 
-                onClick={async () => {
-  setIsConnecting(true);
-  await initializePeerConnection(false);
+           
+<button
+  onClick={() => {
+    setIsConnecting(true);
+    handleAnswer();   // ✅ correct
+  }}
 
-  if (incomingOfferRef.current && peerRef.current) {
-    await peerRef.current.setRemoteDescription(
-      new RTCSessionDescription(incomingOfferRef.current)
-    );
-
-    const answer = await peerRef.current.createAnswer();
-    await peerRef.current.setLocalDescription(answer);
-
-    socketRef.current.emit("webrtc-answer", {
-      roomId,
-      answer,
-    });
-
-    incomingOfferRef.current = null;
-  }
-
-  setIncomingCall(null);
-}}// Logic simplified for brevity, use your existing Accept handler
                 className="bg-emerald-600 hover:bg-emerald-500 px-16 py-5 rounded-2xl font-black uppercase tracking-widest text-sm text-white transition-all shadow-xl shadow-emerald-900/40"
               >
                 Accept Connection
@@ -409,8 +429,13 @@ export default function RoomPage() {
                <div className="w-24 h-24 bg-slate-900 rounded-[2.5rem] border border-slate-800 flex items-center justify-center mx-auto mb-8 shadow-2xl">
                   <MdVideocam size={40} className="text-slate-700" />
                </div>
-               <button
-                onClick={() => { setIsConnecting(true); socketRef.current.emit("call-start", { roomId, user }); initializePeerConnection(true); }}
+              <button
+  onClick={() => { 
+    setIsConnecting(true); 
+    socketRef.current.emit("call-start", { roomId, user }); 
+    startCall();   // ✅ CORRECT
+  }}
+
                 className="bg-emerald-600 hover:bg-emerald-500 px-12 py-5 rounded-2xl font-black uppercase tracking-widest text-sm text-white shadow-2xl shadow-emerald-900/20 transition-all hover:-translate-y-1"
               >
                 Initialize Video Node
