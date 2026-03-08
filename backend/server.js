@@ -28,15 +28,24 @@ app.use(
 
 app.use(express.json());
 
+app.use((req, res, next) => {
+  console.log("Incoming:", req.method, req.url);
+  next();
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/files", fileRoutes);
 
+app.get("/", (req, res) => {
+  res.send("Backend Working");
+});
+
 const server = http.createServer(app);
 socketServer(server);
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log("Server running");
 });

@@ -6,6 +6,7 @@ export const saveMessage = async (data) => {
 
 export const getMessages = async (req, res) => {
   const { roomId } = req.params;
-  const messages = await Message.find({ roomId });
+  const messages = await Message.find({ roomId }).sort({ createdAt: 1 });
   res.json(messages);
 };
+

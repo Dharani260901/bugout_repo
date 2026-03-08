@@ -77,11 +77,26 @@ export default function RoomDashboard() {
     getMyRoomsApi().then((res) => setMyRooms(res.data));
   }, []);
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const copyToClipboard = async (text) => {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Copied to clipboard!");
+    } catch (err) {
+      console.error("Clipboard error:", err);
+    }
+  } else {
+    // Fallback method
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textArea);
+    alert("Copied (fallback)!");
+  }
+};
 
   return (
     <div className="min-h-screen bg-[#0B0F14] text-white font-['Outfit']">
