@@ -6,9 +6,12 @@ import Room from "./models/Room.js";
 const onlineUsers = {}; // socketId -> { roomCode, roomId, user }
 
 export default function socketServer(server) {
-  const io = new Server(server, {
-    cors: { origin: "*" },
-  });
+ const io = new Server(server, {
+  cors: {
+    origin: process.env.CLIENT_URL,
+    methods: ["GET", "POST"]
+  },
+});
 
   io.on("connection", (socket) => {
     console.log("🔌 Connected:", socket.id);
