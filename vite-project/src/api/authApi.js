@@ -2,7 +2,7 @@ import api from "./axios";
 
 /* -------- SIGNUP -------- */
 export const signupApi = async (payload) => {
-  const { data } = await api.post("/api/auth/signup", payload);
+  const { data } = await api.post("/auth/signup", payload);
 
   localStorage.setItem("accessToken", data.accessToken);
   localStorage.setItem("refreshToken", data.refreshToken);
