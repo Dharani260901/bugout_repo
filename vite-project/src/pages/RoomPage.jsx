@@ -47,19 +47,16 @@ export default function RoomPage() {
     socketRef.current = io(SOCKET_URL, {
       transports: ["websocket"],
       auth: {
-    token: localStorage.getItem("accessToken"),
-  },
-      reconnection: true,
-      reconnectionAttempts: 10,
+        token: localStorage.getItem("accessToken"), // ✅ NEW: secure auth
+      },
     });
 
     socketRef.current.removeAllListeners();
 
     socketRef.current.on("connect", () => {
-      socketRef.current.emit("join-room", {
-  roomId,
-});
+      socketRef.current.emit("join-room", { roomId }); // ✅ UPDATED (removed user)
     });
+
 
     socketRef.current.on("receive-message", (msg) => {
   setMessages((prev) => [...prev, msg]);
@@ -74,7 +71,7 @@ export default function RoomPage() {
 
     try {
       ringtoneRef.current.currentTime = 0;
-      ringtoneRef.current.play();
+      ringtoneRef.current.play().catch(() => {});
     } catch (err) {
       console.log("Ringtone blocked by browser");
     }
@@ -133,13 +130,13 @@ export default function RoomPage() {
     });
 
     return () => socketRef.current.disconnect();
-  }, [roomId, user.id]);
+  }, [roomId]);
 
 
   useEffect(() => {
   const fetchMessages = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/messages/${roomId}`);
+      const res = await fetch(`${API_BASE}/messages/${roomId}`);
       const data = await res.json();
       setMessages(data);
     } catch (err) {
@@ -332,6 +329,18 @@ export default function RoomPage() {
     }
   };
 
+
+  const sendMessage = () => {
+    if (!inputMessage.trim()) return;
+
+    // ❗ FIXED: removed id & name (backend handles it securely)
+    socketRef.current.emit("send-message", {
+      roomId,
+      message: inputMessage,
+    });
+
+    setInputMessage("");
+  };
   
   /* ================= UI HELPERS ================= */
   const getAvatarColor = (id = "") => {
@@ -494,17 +503,15 @@ export default function RoomPage() {
                <div className="w-24 h-24 bg-slate-900 rounded-[2.5rem] border border-slate-800 flex items-center justify-center mx-auto mb-8 shadow-2xl">
                   <MdVideocam size={40} className="text-slate-700" />
                </div>
-              <button
-  onClick={() => { 
-    setIsConnecting(true); 
-    socketRef.current.emit("call-start", { roomId, user }); 
-    startCall();   // ✅ CORRECT
+<button
+  onClick={() => {
+    socketRef.current.emit("call-start", { roomId });
+    startCall();
   }}
-
-                className="bg-emerald-600 hover:bg-emerald-500 px-12 py-5 rounded-2xl font-black uppercase tracking-widest text-sm text-white shadow-2xl shadow-emerald-900/20 transition-all hover:-translate-y-1"
-              >
-                Initialize Video Node
-              </button>
+  className="bg-emerald-600 hover:bg-emerald-500 px-12 py-5 rounded-2xl font-black uppercase tracking-widest text-sm text-white shadow-2xl transition-all"
+>
+  Initialize Video Node
+</button>
             </div>
           )}
         </main>
@@ -537,7 +544,9 @@ export default function RoomPage() {
               <input
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && inputMessage && (socketRef.current.emit("send-message", { roomId, ...user, message: inputMessage }), setInputMessage(""))}
+                onKeyDown={(e) => {
+  if (e.key === "Enter") sendMessage();
+}}
                 className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl px-5 py-4 text-sm focus:border-emerald-500/50 outline-none transition-all pr-14 font-medium"
                 placeholder="Secure message..."
               />
@@ -545,7 +554,7 @@ export default function RoomPage() {
                 onClick={() => inputMessage && (socketRef.current.emit("send-message", { roomId, ...user, message: inputMessage }), setInputMessage(""))}
                 className="absolute right-2 p-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all"
               >
-                <MdSend size={18} />
+                <MdSend size={18} onClick={sendMessage} />
               </button>
             </div>
           </div>
