@@ -57,9 +57,8 @@ export default function RoomPage() {
 
     socketRef.current.on("connect", () => {
       socketRef.current.emit("join-room", {
-        roomId,
-        user: { id: user.id, name: user.name },
-      });
+  roomId,
+});
     });
 
     socketRef.current.on("receive-message", (msg) => {
