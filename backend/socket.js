@@ -19,20 +19,19 @@ export default function socketServer(server) {
     console.log("🔌 Connected:", socket.id);
 
     /* ================= JOIN ROOM ================= */
-    socket.on("join-room", async ({ roomId, user }) => {
-      // roomId here is roomCode
-      const room = await Room.findOne({ roomCode: roomId });
-      if (!room) return;
+  socket.on("join-room", async ({ roomId }) => {
+  try {
+    const userId = socket.userId;
 
-      socket.join(roomId); // ALWAYS use roomCode for socket room
+    const user = await User.findById(userId);
+    const room = await Room.findOne({ roomCode: roomId });
 
-      room.lastActiveAt = new Date();
-      await room.save();
+    if (!room) return;
 
-      const member = await RoomMember.findOne({
-        roomId: room._id,
-        userId: user.id,
-      });
+    const member = await RoomMember.findOne({
+      roomId: room._id,
+      userId: userId,
+    });
 
       // Remove previous socket if same user reconnects
       for (const [sockId, data] of Object.entries(onlineUsers)) {
