@@ -13,7 +13,7 @@ export const signupApi = async (payload) => {
 
 /* -------- LOGIN -------- */
 export const loginApi = async (payload) => {
-  const { data } = await api.post("/api/auth/login", payload);
+  const { data } = await api.post("/auth/login", payload);
 
   localStorage.setItem("accessToken", data.accessToken);
   localStorage.setItem("refreshToken", data.refreshToken);
