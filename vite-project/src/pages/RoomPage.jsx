@@ -46,6 +46,9 @@ export default function RoomPage() {
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
       transports: ["websocket"],
+      auth: {
+    token: localStorage.getItem("accessToken"),
+  },
       reconnection: true,
       reconnectionAttempts: 10,
     });
