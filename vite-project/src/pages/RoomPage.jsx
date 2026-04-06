@@ -69,6 +69,9 @@ export default function RoomPage() {
   if (from.id !== user.id) {
     setIncomingCall(from);
 
+     // ✅ ADD THIS LINE
+    incomingOfferRef.current = null;
+
     try {
       ringtoneRef.current.currentTime = 0;
       ringtoneRef.current.play().catch(() => {});
@@ -79,13 +82,8 @@ export default function RoomPage() {
 });
 
 
-socketRef.current.on("webrtc-offer", async ({ offer }) => {
-  if (!peerRef.current) createPeer();
-
-  await peerRef.current.setRemoteDescription(
-    new RTCSessionDescription(offer)
-  );
-
+socketRef.current.on("webrtc-offer", ({ offer }) => {
+  // ✅ ONLY STORE
   incomingOfferRef.current = offer;
 });
 
@@ -225,10 +223,14 @@ const handleAnswer = async () => {
     ringtoneRef.current.pause();
     ringtoneRef.current.currentTime = 0;
 
-    if (!incomingOfferRef.current) return;
+    if (!incomingOfferRef.current) {
+  console.log("⏳ Waiting for offer...");
+  return;
+}
 
     if (!peerRef.current) createPeer();
 
+    // ✅ ONLY PLACE WHERE REMOTE IS SET
     await peerRef.current.setRemoteDescription(
       new RTCSessionDescription(incomingOfferRef.current)
     );
@@ -259,9 +261,6 @@ const handleAnswer = async () => {
     console.error("Answer error:", err);
   }
 };
-
-
-
 
 
  const endCall = () => {
