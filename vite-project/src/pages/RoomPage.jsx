@@ -46,7 +46,7 @@ export default function RoomPage() {
     socketRef.current = io(SOCKET_URL, {
       transports: ["websocket"],
       auth: {
-        token: localStorage.getItem("accessToken"), // ✅ NEW: secure auth
+        token: sessionStorage.getItem("accessToken"), // ✅ NEW: secure auth
       },
     });
 
